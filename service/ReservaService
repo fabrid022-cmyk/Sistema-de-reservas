@@ -1,0 +1,37 @@
+package com.fabrizio.sistema_reservas.service;
+
+import com.fabrizio.sistema_reservas.model.Estado;
+import com.fabrizio.sistema_reservas.model.Reserva;
+import com.fabrizio.sistema_reservas.repository.ReservaRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+
+@Service
+public class ReservaService {
+
+    @Autowired
+    private ReservaRepository reservaRepository;
+
+    // @Transactional asegura que si algo falla acá adentro, no se guarde nada a medias
+    @Transactional
+    public Reserva crearReserva(Reserva reserva) {
+        // Regla de negocio: Toda reserva nueva arranca como PENDIENTE y con la fecha actual
+        reserva.setEstado(Estado.PENDIENTE);
+        reserva.setFechaHoraCreacion(LocalDateTime.now());
+        
+        // Acá a futuro podemos sumar validaciones (ej. verificar que las butacas elegidas estén libres)
+        
+        return reservaRepository.save(reserva);
+    }
+
+    @Transactional
+    public void confirmarReserva(Integer idReserva) {
+        reservaRepository.findById(idReserva).ifPresent(reserva -> {
+            reserva.setEstado(Estado.CONFIRMADA);
+            reservaRepository.save(reserva);
+        });
+    }
+}

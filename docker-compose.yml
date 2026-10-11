@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres_db:
+    image: postgres:15
+    container_name: cine_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: cine_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - cine_db_data:/var/lib/postgresql/data
+
+volumes:
+  cine_db_data:
