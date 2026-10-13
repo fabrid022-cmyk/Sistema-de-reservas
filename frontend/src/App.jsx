@@ -11,7 +11,9 @@ function App() {
 
   const [cines, setCines] = useState([])
   const [peliculas, setPeliculas] = useState([])
+  // 'funciones' es para la vista del cliente (por cine), 'funcionesAdmin' es para listar todas en el panel
   const [funciones, setFunciones] = useState([])
+  const [funcionesAdmin, setFuncionesAdmin] = useState([])
   const [butacasOcupadas, setButacasOcupadas] = useState([])
 
   // Formularios Admin
@@ -24,6 +26,10 @@ function App() {
   const [funcionSalaId, setFuncionSalaId] = useState('')
   const [funcionPeliId, setFuncionPeliId] = useState('')
   const [funcionHorario, setFuncionHorario] = useState('')
+
+  // Edición de Funciones
+  const [editandoFuncionId, setEditandoFuncionId] = useState(null)
+  const [nuevoHorarioEdit, setNuevoHorarioEdit] = useState('')
 
   // Formularios de Sala (dinámicos)
   const [nuevaSalaNumero, setNuevaSalaNumero] = useState('')
@@ -41,7 +47,9 @@ function App() {
   const cargarDatos = () => {
     fetch(`${API_URL}/api/cines`).then(r => r.json()).then(d => setCines(Array.isArray(d) ? d : []));
     fetch(`${API_URL}/api/peliculas`).then(r => r.json()).then(d => setPeliculas(Array.isArray(d) ? d : []));
-    fetch(`${API_URL}/api/funciones`).then(r => r.json()).then(d => setFunciones(Array.isArray(d) ? d : []));
+    if (usuario?.rol === 'ADMIN') {
+      fetch(`${API_URL}/api/funciones`).then(r => r.json()).then(d => setFuncionesAdmin(Array.isArray(d) ? d : []));
+    }
   }
 
   useEffect(() => { if (usuario) cargarDatos(); }, [usuario])
@@ -162,6 +170,29 @@ function App() {
     if (res.ok) {
       alert('¡Función programada con éxito!'); 
       setFuncionCineId(''); setFuncionSalaId(''); setFuncionPeliId(''); setFuncionHorario('');
+      cargarDatos();
+    }
+  }
+
+  const guardarEdicionFuncion = async (idFuncion) => {
+    if (!nuevoHorarioEdit) return alert("Ingresá un nuevo horario.");
+    const res = await fetch(`${API_URL}/api/funciones/${idFuncion}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ horario: nuevoHorarioEdit })
+    })
+    if (res.ok) {
+      setEditandoFuncionId(null);
+      setNuevoHorarioEdit('');
+      cargarDatos();
+    } else {
+      alert("No se pudo editar la función.");
+    }
+  }
+
+  const eliminarFuncion = async (idFuncion) => {
+    if (window.confirm("¿Eliminar esta función?")) {
+      await fetch(`${API_URL}/api/funciones/${idFuncion}`, { method: 'DELETE' });
       cargarDatos();
     }
   }
@@ -301,7 +332,7 @@ function App() {
           </div>
         </div>
 
-        {/* PROGRAMAR FUNCIONES */}
+        {/* PROGRAMAR Y EDITAR FUNCIONES */}
         <div style={{ padding: '20px', border: '1px solid #333', borderRadius: '8px', background: '#f8f9fa' }}>
           <h3>3. Programar Función</h3>
           <form onSubmit={crearFuncion} style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -325,6 +356,35 @@ function App() {
             <input type="datetime-local" value={funcionHorario} onChange={e => setFuncionHorario(e.target.value)} required style={{ padding: '8px' }} />
             <button type="submit" style={{ background: '#007bff', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}>Programar Función</button>
           </form>
+
+          {/* LISTA DE FUNCIONES ACTIVAS */}
+          <h4 style={{ borderTop: '1px solid #ddd', paddingTop: '15px' }}>Funciones Activas (Admin):</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px' }}>
+            {funcionesAdmin.length === 0 ? <p>No hay funciones programadas.</p> : funcionesAdmin.map(f => (
+              <div key={f.idFuncion} style={{ padding: '15px', background: '#fff', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#333' }}>🎬 {f.pelicula?.titulo}</h4>
+                  <button onClick={() => eliminarFuncion(f.idFuncion)} style={{ color: '#dc3545', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>✖</button>
+                </div>
+                
+                <p style={{ margin: '5px 0', fontSize: '0.9em', color: '#555' }}>📍 {f.sala?.cine?.nombre || 'Cine'} — Sala {f.sala?.numero}</p>
+                <p style={{ margin: '5px 0', fontSize: '0.95em', color: '#007bff', fontWeight: 'bold' }}>🕒 {new Date(f.horario).toLocaleString()}</p>
+
+                {/* MODO EDICIÓN DE HORARIO */}
+                {editandoFuncionId === f.idFuncion ? (
+                  <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
+                    <input type="datetime-local" value={nuevoHorarioEdit} onChange={e => setNuevoHorarioEdit(e.target.value)} style={{ padding: '6px', fontSize: '0.85em', flex: 1 }} />
+                    <button onClick={() => guardarEdicionFuncion(f.idFuncion)} style={{ background: '#28a745', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}>OK</button>
+                    <button onClick={() => setEditandoFuncionId(null)} style={{ background: '#6c757d', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}>Cancelar</button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setEditandoFuncionId(f.idFuncion); setNuevoHorarioEdit(f.horario.substring(0,16)); }} style={{ fontSize: '0.85em', background: '#ffc107', color: '#000', border: 'none', padding: '6px 12px', borderRadius: '4px', marginTop: '10px', cursor: 'pointer', fontWeight: 'bold' }}>
+                    ✏️ Editar Horario
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     )
