@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
+// 1. Centralizamos la URL de tu backend
+const API_URL = import.meta.env.VITE_API_URL || 'https://sistema-de-reservas-642w.onrender.com';
+
 function App() {
   const [usuario, setUsuario] = useState(null)
   const [email, setEmail] = useState('')
@@ -35,9 +38,9 @@ function App() {
   const [reservaExitosa, setReservaExitosa] = useState(false)
 
   const cargarDatos = () => {
-    fetch('https://sistema-de-reservas-642w.onrender.com/api/cines').then(r => r.json()).then(d => setCines(Array.isArray(d) ? d : []));
+    fetch(`${API_URL}/api/cines`).then(r => r.json()).then(d => setCines(Array.isArray(d) ? d : []));
     if (usuario?.rol === 'ADMIN') {
-      fetch('https://sistema-de-reservas-642w.onrender.com/api/peliculas').then(r => r.json()).then(d => setPeliculas(Array.isArray(d) ? d : []));
+      fetch(`${API_URL}/api/peliculas`).then(r => r.json()).then(d => setPeliculas(Array.isArray(d) ? d : []));
     }
   }
 
@@ -58,7 +61,7 @@ function App() {
   const iniciarSesion = async (e) => {
     e.preventDefault()
     setErrorLogin('')
-    const res = await fetch('https://sistema-de-reservas-642w.onrender.com/api/auth/login', {
+    const res = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
     })
     if (res.ok) setUsuario(await res.json())
@@ -73,23 +76,23 @@ function App() {
   // --- CRUD ADMIN ---
   const crearCine = async (e) => {
     e.preventDefault()
-    const res = await fetch('https://sistema-de-reservas-642w.onrender.com/api/cines', {
+    const res = await fetch(`${API_URL}/api/cines`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nuevoCineNombre, ubicacion: { pais: "Argentina", direccion: nuevoCineDireccion }}) // Ahora se crea VACÍO (sin salas)
+      body: JSON.stringify({ nombre: nuevoCineNombre, ubicacion: { pais: "Argentina", direccion: nuevoCineDireccion }})
     })
     if (res.ok) { setNuevoCineNombre(''); setNuevoCineDireccion(''); cargarDatos(); }
   }
 
   const eliminarCine = async (id) => {
     if (window.confirm("¿Borrar cine?")) {
-      await fetch(`https://sistema-de-reservas-642w.onrender.com/api/cines/${id}`, { method: 'DELETE' })
+      await fetch(`${API_URL}/api/cines/${id}`, { method: 'DELETE' })
       cargarDatos()
     }
   }
 
   const agregarSala = async (e, idCine) => {
     e.preventDefault()
-    const res = await fetch(`https://sistema-de-reservas-642w.onrender.com/api/salas/cine/${idCine}`, {
+    const res = await fetch(`${API_URL}/api/salas/cine/${idCine}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ numero: parseInt(nuevaSalaNumero), capacidad: parseInt(nuevaSalaCapacidad) })
     })
@@ -99,7 +102,7 @@ function App() {
 
   const eliminarSala = async (idSala) => {
     if (window.confirm("¿Borrar sala?")) {
-      await fetch(`https://sistema-de-reservas-642w.onrender.com/api/salas/${idSala}`, { method: 'DELETE' })
+      await fetch(`${API_URL}/api/salas/${idSala}`, { method: 'DELETE' })
       cargarDatos()
     }
   }
@@ -107,7 +110,7 @@ function App() {
   const crearPelicula = async (e) => {
     e.preventDefault()
     try {
-      const res = await fetch('https://sistema-de-reservas-642w.onrender.com/api/peliculas', {
+      const res = await fetch(`${API_URL}/api/peliculas`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ titulo: nuevaPeliTitulo, idioma: nuevaPeliIdioma, formato: "2D", duracionMinutos: 120 })
       })
@@ -122,13 +125,11 @@ function App() {
   }
 
   const eliminarPelicula = async (id) => {
-    await fetch(`https://sistema-de-reservas-642w.onrender.com/api/peliculas/${id}`, { method: 'DELETE' }); cargarDatos();
+    await fetch(`${API_URL}/api/peliculas/${id}`, { method: 'DELETE' }); cargarDatos();
   }
 
   const crearFuncion = async (e) => {
     e.preventDefault()
-    
-    // 1. Nos aseguramos de que no sean NaN ni nulos
     const idPeli = parseInt(funcionPeliId);
     const idSala = parseInt(funcionSalaId);
 
@@ -138,7 +139,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('https://sistema-de-reservas-642w.onrender.com/api/funciones', {
+      const res = await fetch(`${API_URL}/api/funciones`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ 
           pelicula: { idPelicula: idPeli }, 
@@ -146,7 +147,6 @@ function App() {
           horario: funcionHorario 
         })
       })
-      
       if (res.ok) {
         alert('¡Función programada con éxito!'); 
         setFuncionCineId(''); setFuncionSalaId(''); setFuncionPeliId(''); setFuncionHorario('');
@@ -161,14 +161,14 @@ function App() {
   // --- LÓGICA CLIENTE ---
   const manejarClickCine = async (cine) => {
     setCineSeleccionado(cine); setFuncionSeleccionada(null); setButacasSeleccionadas([]);
-    const res = await fetch(`https://sistema-de-reservas-642w.onrender.com/api/funciones/cine/${cine.idCine}`)
+    const res = await fetch(`${API_URL}/api/funciones/cine/${cine.idCine}`)
     const data = await res.json()
     setFunciones(Array.isArray(data) ? data : [])
   }
 
   const seleccionarFuncion = async (funcion) => {
     setFuncionSeleccionada(funcion); setButacasSeleccionadas([]); setTiempoRestante(300); setReservaExitosa(false);
-    const res = await fetch(`https://sistema-de-reservas-642w.onrender.com/api/reservas/ocupadas/${funcion.idFuncion}`)
+    const res = await fetch(`${API_URL}/api/reservas/ocupadas/${funcion.idFuncion}`)
     const data = await res.json()
     setButacasOcupadas(Array.isArray(data) ? data : [])
   }
@@ -181,14 +181,13 @@ function App() {
     }
 
     try {
-      const res = await fetch('https://sistema-de-reservas-642w.onrender.com/api/reservas', {
+      const res = await fetch(`${API_URL}/api/reservas`, {
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify(payload)
       })
 
       if (res.ok) {
-        // Agregamos las butacas recién compradas al arreglo de ocupadas para que se pongan rojas al instante
         setButacasOcupadas(prev => [...prev, ...butacasSeleccionadas])
         setReservaExitosa(true)
       } else {
