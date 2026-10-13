@@ -3,6 +3,9 @@ import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://sistema-de-reservas-642w.onrender.com';
 
+// Nombres de campo posibles para la fecha de la función según cómo lo devuelva el backend
+const CLAVES_HORARIO = ['horario', 'fechaHora', 'fecha_hora', 'fechaFuncion', 'fecha', 'inicio', 'fechaInicio'];
+
 function App() {
   // --- ESTADOS GLOBALES ---
   const [usuario, setUsuario] = useState(null)
@@ -26,10 +29,15 @@ function App() {
   const [funcionPeliId, setFuncionPeliId] = useState('')
   const [funcionHorario, setFuncionHorario] = useState('')
 
+  // --- ADMIN: FILTROS Y ESTADO DEL CRONOGRAMA ---
+  const [filtroAdminPeli, setFiltroAdminPeli] = useState('')
+  const [filtroAdminCine, setFiltroAdminCine] = useState('')
+  const [peliculasColapsadas, setPeliculasColapsadas] = useState({})
+
   // --- ADMIN: EDITOR DE SALAS Y BUTACAS ---
   const [nuevaSalaNumero, setNuevaSalaNumero] = useState('')
   const [editandoMapaButacas, setEditandoMapaButacas] = useState(null)
-  const [matrizLayout, setMatrizLayout] = useState([]) 
+  const [matrizLayout, setMatrizLayout] = useState([])
   const FILAS_MAX = 12;
   const COLS_MAX = 12;
 
@@ -40,7 +48,7 @@ function App() {
   const [peliculaSeleccionada, setPeliculaSeleccionada] = useState(null)
   const [funcionSeleccionada, setFuncionSeleccionada] = useState(null)
   const [butacasSeleccionadas, setButacasSeleccionadas] = useState([]) // Acá guardamos objetos { id: 1, etiqueta: 'A1' }
-  
+
   const [tiempoRestante, setTiempoRestante] = useState(300)
   const [reservaExitosa, setReservaExitosa] = useState(false)
 
@@ -51,25 +59,90 @@ function App() {
   const getIdCine = (c) => c ? (c.idCine || c.id) : null;
   const getIdFuncion = (f) => f ? (f.idFuncion || f.id) : null;
 
-  // PARSEADOR INFALIBLE DE FECHAS (SOLUCIÓN AL INVALID DATE)
-  const parsearFecha = (fechaCruda) => {
-    if (!fechaCruda) return null;
+  // Busca el valor crudo de la fecha en cualquiera de los nombres de campo posibles
+  const getHorarioRaw = (f) => {
+    if (!f) return null;
+    for (const k of CLAVES_HORARIO) {
+      if (f[k] !== undefined && f[k] !== null && f[k] !== '') return f[k];
+    }
+    return null;
+  };
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  // PARSEADOR DE FECHAS: soporta array de Spring, timestamp, objeto, ISO, ISO con micros/zona, dd/mm/yyyy
+  const parsearFecha = (cruda) => {
+    if (cruda === null || cruda === undefined || cruda === '') return null;
     try {
-      // Solución principal: Spring Boot manda un array [año, mes, dia, hora, minuto]
-      if (Array.isArray(fechaCruda)) {
-        const [y, m, d, h = 0, min = 0, s = 0] = fechaCruda;
-        // En JavaScript los meses son 0-11, por eso m - 1
-        return new Date(y, m - 1, d, h, min, s);
+      let dObj = null;
+
+      if (cruda instanceof Date) {
+        dObj = cruda;
       }
-      
-      let str = String(fechaCruda).trim();
-      str = str.replace(' ', 'T'); 
-      const dObj = new Date(str);
-      if (!isNaN(dObj.getTime())) return dObj;
-      return null;
+      // Spring Boot (LocalDateTime sin configurar): [año, mes, dia, hora, minuto, segundo]
+      else if (Array.isArray(cruda)) {
+        const [y, m, d, h = 0, min = 0, s = 0] = cruda.map(Number);
+        dObj = new Date(y, m - 1, d, h, min, s); // en JS los meses van de 0 a 11
+      }
+      // Timestamp numérico (ms o segundos)
+      else if (typeof cruda === 'number') {
+        dObj = new Date(cruda < 1e11 ? cruda * 1000 : cruda);
+      }
+      // Objeto tipo { year, monthValue, dayOfMonth, hour, minute }
+      else if (typeof cruda === 'object') {
+        const y = cruda.year;
+        const m = cruda.monthValue ?? cruda.month;
+        const d = cruda.dayOfMonth ?? cruda.day;
+        if (y && m && d) dObj = new Date(y, m - 1, d, cruda.hour || 0, cruda.minute || 0, cruda.second || 0);
+      }
+      else {
+        const str = String(cruda).trim();
+
+        // Solo fecha: 2026-10-13 (new Date() la tomaría como UTC y corre el día)
+        let m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) {
+          dObj = new Date(+m[1], +m[2] - 1, +m[3]);
+        } else {
+          // ISO sin zona horaria: 2026-10-13T20:00 | 2026-10-13 20:00:00 | con fracciones
+          m = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:[.,]\d+)?$/);
+          if (m) {
+            dObj = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+          } else {
+            // dd/mm/yyyy [hh:mm]
+            m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T,]+(\d{1,2}):(\d{2}))?/);
+            if (m) {
+              dObj = new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0));
+            } else {
+              // ISO con zona (Z / -03:00): se convierte a hora local
+              dObj = new Date(str.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1'));
+            }
+          }
+        }
+      }
+
+      return dObj && !isNaN(dObj.getTime()) ? dObj : null;
     } catch (e) {
       return null;
     }
+  };
+
+  // yyyy-mm-dd en hora local
+  const claveDia = (dateObj) => `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`;
+
+  // HH:MM manual (evita "08:00 p. m." según el navegador)
+  const formatHora = (dateObj) => dateObj ? `${pad2(dateObj.getHours())}:${pad2(dateObj.getMinutes())}` : null;
+
+  // 13/10/2026 20:00 hs
+  const formatFechaHora = (dateObj) =>
+    dateObj
+      ? `${pad2(dateObj.getDate())}/${pad2(dateObj.getMonth() + 1)}/${dateObj.getFullYear()} ${formatHora(dateObj)} hs`
+      : null;
+
+  // "martes, 13 de octubre"
+  const formatDiaLargo = (diaString) => {
+    if (!diaString || diaString === 'Fecha_Invalida') return '⚠️ Fecha inválida / A confirmar';
+    const [y, m, d] = diaString.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
   };
 
   // ==========================================
@@ -85,7 +158,8 @@ function App() {
       let cinesData = [];
       if (resCines.ok) {
         cinesData = await resCines.json();
-        setCines(Array.isArray(cinesData) ? cinesData : []);
+        if (!Array.isArray(cinesData)) cinesData = [];
+        setCines(cinesData);
       }
 
       if (resPelis.ok) {
@@ -102,21 +176,15 @@ function App() {
             const funcData = await resFunc.json();
             if (Array.isArray(funcData)) {
               const mapeadas = funcData.map(f => {
-                const dateObj = parsearFecha(f.horario);
-                let diaString = 'Fecha_Invalida';
-                
-                if (dateObj) {
-                  const y = dateObj.getFullYear();
-                  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-                  const d = String(dateObj.getDate()).padStart(2, '0');
-                  diaString = `${y}-${m}-${d}`;
-                }
+                const horarioRaw = getHorarioRaw(f);
+                const dateObj = parsearFecha(horarioRaw);
 
-                return { 
-                  ...f, 
+                return {
+                  ...f,
                   cineAsociado: cine,
+                  horarioRaw,
                   fechaObj: dateObj,
-                  diaString: diaString
+                  diaString: dateObj ? claveDia(dateObj) : 'Fecha_Invalida'
                 };
               });
               todasLasFunciones = [...todasLasFunciones, ...mapeadas];
@@ -163,7 +231,7 @@ function App() {
   }
 
   const reiniciarFlujoCliente = () => {
-    setPasoCliente(1); setCineSeleccionado(null); setPeliculaSeleccionada(null); 
+    setPasoCliente(1); setCineSeleccionado(null); setPeliculaSeleccionada(null);
     setFuncionSeleccionada(null); setButacasSeleccionadas([]); setReservaExitosa(false); setTiempoRestante(300);
   }
 
@@ -194,12 +262,14 @@ function App() {
   }
   const crearFuncion = async (e) => {
     e.preventDefault();
+    // El input datetime-local manda "2026-10-13T20:00"; le agregamos segundos para que Spring (LocalDateTime) lo parsee sin problemas
+    const horarioEnviar = funcionHorario.length === 16 ? `${funcionHorario}:00` : funcionHorario;
     const res = await fetch(`${API_URL}/api/funciones`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ 
-        pelicula: { idPelicula: parseInt(funcionPeliId) }, 
-        sala: { idSala: parseInt(funcionSalaId) }, 
-        horario: funcionHorario 
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pelicula: { idPelicula: parseInt(funcionPeliId) },
+        sala: { idSala: parseInt(funcionSalaId) },
+        horario: horarioEnviar
       })
     });
     if (res.ok) { alert('Función programada!'); setFuncionCineId(''); setFuncionSalaId(''); setFuncionPeliId(''); setFuncionHorario(''); cargarDatos(); }
@@ -217,7 +287,7 @@ function App() {
   }
 
   const toggleButacaLayout = (r, c) => {
-    const nueva = [...matrizLayout];
+    const nueva = matrizLayout.map(fila => [...fila]);
     nueva[r][c] = !nueva[r][c];
     setMatrizLayout(nueva);
   }
@@ -229,8 +299,8 @@ function App() {
 
     await fetch(`${API_URL}/api/salas/cine/${editandoMapaButacas}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        numero: parseInt(nuevaSalaNumero), 
+      body: JSON.stringify({
+        numero: parseInt(nuevaSalaNumero),
         capacidad: cap,
         layoutPersonalizado: layoutStr
       })
@@ -245,7 +315,7 @@ function App() {
   // ==========================================
   // 4. LÓGICA DEL CLIENTE (FILTROS CRUZADOS)
   // ==========================================
-  
+
   const peliculasConFuncionesActivas = useMemo(() => {
     const map = new Map();
     funcionesGlobales.forEach(f => { if(f.pelicula) map.set(getIdPeli(f.pelicula), f.pelicula) });
@@ -260,7 +330,7 @@ function App() {
   }
 
   const obtenerFuncionesParaCliente = () => {
-    return funcionesGlobales.filter(f => 
+    return funcionesGlobales.filter(f =>
       getIdPeli(f.pelicula) === getIdPeli(peliculaSeleccionada) &&
       getIdCine(f.cineAsociado) === getIdCine(cineSeleccionado)
     );
@@ -300,10 +370,10 @@ function App() {
     const arrayNumerosButacas = butacasSeleccionadas.map(b => b.id);
 
     // Estructura EXACTA de tu ReservaRequestDTO en Spring Boot
-    const payload = { 
-      idUsuario: idU, 
-      idSala: idS, 
-      butacasSeleccionadas: arrayNumerosButacas 
+    const payload = {
+      idUsuario: idU,
+      idSala: idS,
+      butacasSeleccionadas: arrayNumerosButacas
     };
 
     try {
@@ -311,7 +381,7 @@ function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setButacasOcupadas(prev => [...prev, ...arrayNumerosButacas]); 
+        setButacasOcupadas(prev => [...prev, ...arrayNumerosButacas]);
         setReservaExitosa(true);
       } else {
         const errorText = await res.text();
@@ -325,7 +395,7 @@ function App() {
   const generarMatrizCliente = () => {
     let layoutArray = null;
     const salaObj = funcionSeleccionada?.sala;
-    
+
     if (salaObj?.layoutPersonalizado) {
       try { layoutArray = JSON.parse(salaObj.layoutPersonalizado); } catch(e){}
     }
@@ -375,16 +445,60 @@ function App() {
   // VISTA ADMINISTRADOR
   // ----------------------------------------------------
   if (usuario.rol === 'ADMIN') {
-    // Agrupar funciones para Admin sin ocultar las rotas
-    const cronogramaAdminAgrupado = funcionesGlobales.reduce((acc, f) => {
-      const peliTitulo = f.pelicula?.titulo || 'Desconocida';
-      const fechaClave = f.diaString; 
-      
-      if (!acc[peliTitulo]) acc[peliTitulo] = {};
-      if (!acc[peliTitulo][fechaClave]) acc[peliTitulo][fechaClave] = [];
-      acc[peliTitulo][fechaClave].push(f);
-      return acc;
-    }, {});
+    const hoyStr = claveDia(new Date());
+
+    // Filtros del cronograma
+    const funcionesAdminFiltradas = funcionesGlobales.filter(f =>
+      (!filtroAdminPeli || String(getIdPeli(f.pelicula)) === filtroAdminPeli) &&
+      (!filtroAdminCine || String(getIdCine(f.cineAsociado)) === filtroAdminCine)
+    );
+
+    // Agrupación: Película > Día > Cine > funciones
+    const cronogramaPorPelicula = {};
+    funcionesAdminFiltradas.forEach(f => {
+      const key = String(getIdPeli(f.pelicula) ?? 'desconocida');
+      if (!cronogramaPorPelicula[key]) {
+        cronogramaPorPelicula[key] = {
+          key,
+          titulo: f.pelicula?.titulo || 'Película desconocida',
+          idioma: f.pelicula?.idioma || '',
+          total: 0,
+          dias: {}
+        };
+      }
+      const grupo = cronogramaPorPelicula[key];
+      grupo.total++;
+      if (!grupo.dias[f.diaString]) grupo.dias[f.diaString] = [];
+      grupo.dias[f.diaString].push(f);
+    });
+    const peliculasCronograma = Object.values(cronogramaPorPelicula).sort((a, b) => a.titulo.localeCompare(b.titulo));
+
+    const ordenarDias = (dias) => Object.keys(dias).sort((a, b) => {
+      if (a === 'Fecha_Invalida') return 1;
+      if (b === 'Fecha_Invalida') return -1;
+      return a.localeCompare(b);
+    });
+
+    const agruparPorCine = (funciones) => {
+      const porCine = {};
+      funciones.forEach(f => {
+        const k = String(getIdCine(f.cineAsociado));
+        if (!porCine[k]) porCine[k] = { nombre: f.cineAsociado?.nombre || 'Cine', funciones: [] };
+        porCine[k].funciones.push(f);
+      });
+      Object.values(porCine).forEach(c => c.funciones.sort((a, b) => (a.fechaObj?.getTime() || 0) - (b.fechaObj?.getTime() || 0)));
+      return Object.values(porCine).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    };
+
+    const toggleColapsada = (key) => setPeliculasColapsadas(prev => ({ ...prev, [key]: !prev[key] }));
+    const colapsarTodas = (valor) => {
+      const nuevo = {};
+      peliculasCronograma.forEach(p => { nuevo[p.key] = valor; });
+      setPeliculasColapsadas(nuevo);
+    };
+
+    const estiloSelectAdmin = { padding: '10px', background: '#1a1a1a', color: '#fff', border: '1px solid #333', borderRadius: '6px' };
+    const estiloBotonChico = { padding: '8px 14px', background: '#1a1a1a', color: '#fff', border: '1px solid #444', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85em' };
 
     return (
       <div style={{ minHeight: '100vh', background: '#080808', color: '#f1f1f1', padding: '20px', fontFamily: 'system-ui, sans-serif' }}>
@@ -428,7 +542,7 @@ function App() {
                             {matrizLayout.map((fila, rIndex) => (
                               <div key={rIndex} style={{ display: 'flex', gap: '5px' }}>
                                 {fila.map((activa, cIndex) => (
-                                  <div key={cIndex} onClick={() => toggleButacaLayout(rIndex, cIndex)} 
+                                  <div key={cIndex} onClick={() => toggleButacaLayout(rIndex, cIndex)}
                                        style={{ width: '30px', height: '30px', background: activa ? '#0d6efd' : '#111', borderRadius: '4px', cursor: 'pointer', border: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     {activa && <span style={{fontSize:'0.6em', color:'#fff'}}>{cIndex+1}</span>}
                                   </div>
@@ -483,62 +597,124 @@ function App() {
           {/* TAB CRONOGRAMA */}
           {activeTabAdmin === 'funciones' && (
             <div style={{ background: '#121212', borderRadius: '12px', padding: '20px', border: '1px solid #222' }}>
-              <form onSubmit={crearFuncion} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '25px' }}>
-                <select value={funcionCineId} onChange={e => { setFuncionCineId(e.target.value); setFuncionSalaId(''); }} style={{ padding: '10px', background: '#1a1a1a', color:'#fff', border:'1px solid #333', borderRadius:'6px' }} required>
+              {/* FORMULARIO NUEVA FUNCIÓN */}
+              <form onSubmit={crearFuncion} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '30px' }}>
+                <select value={funcionCineId} onChange={e => { setFuncionCineId(e.target.value); setFuncionSalaId(''); }} style={estiloSelectAdmin} required>
                   <option value="">1. Complejo...</option>
                   {cines.map(c => <option key={getIdCine(c)} value={getIdCine(c)}>{c.nombre}</option>)}
                 </select>
-                <select value={funcionSalaId} onChange={e => setFuncionSalaId(e.target.value)} disabled={!funcionCineId} style={{ padding: '10px', background: '#1a1a1a', color:'#fff', border:'1px solid #333', borderRadius:'6px' }} required>
+                <select value={funcionSalaId} onChange={e => setFuncionSalaId(e.target.value)} disabled={!funcionCineId} style={estiloSelectAdmin} required>
                   <option value="">2. Sala...</option>
-                  {cines.find(c => getIdCine(c).toString() === funcionCineId)?.salas.map(s => <option key={s.idSala || s.id} value={s.idSala || s.id}>Sala {s.numero}</option>)}
+                  {cines.find(c => String(getIdCine(c)) === funcionCineId)?.salas?.map(s => <option key={s.idSala || s.id} value={s.idSala || s.id}>Sala {s.numero}</option>)}
                 </select>
-                <select value={funcionPeliId} onChange={e => setFuncionPeliId(e.target.value)} style={{ padding: '10px', background: '#1a1a1a', color:'#fff', border:'1px solid #333', borderRadius:'6px' }} required>
+                <select value={funcionPeliId} onChange={e => setFuncionPeliId(e.target.value)} style={estiloSelectAdmin} required>
                   <option value="">3. Película...</option>
                   {peliculas.map(p => <option key={getIdPeli(p)} value={getIdPeli(p)}>{p.titulo}</option>)}
                 </select>
-                <input type="datetime-local" value={funcionHorario} onChange={e => setFuncionHorario(e.target.value)} style={{ padding: '10px', background: '#1a1a1a', color:'#fff', border:'1px solid #333', borderRadius:'6px' }} required />
+                <input type="datetime-local" value={funcionHorario} onChange={e => setFuncionHorario(e.target.value)} style={estiloSelectAdmin} required />
                 <button type="submit" style={{ gridColumn: '1 / -1', padding: '12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '6px', cursor:'pointer', fontWeight: 'bold' }}>Programar Nueva Función</button>
               </form>
 
-              <h3 style={{ borderBottom: '1px solid #333', paddingBottom: '10px', marginBottom: '20px', color: '#fff' }}>Organización de Cartelera</h3>
-              
-              {Object.keys(cronogramaAdminAgrupado).sort().map(peliTitulo => (
-                <div key={peliTitulo} style={{ marginBottom: '30px', background: '#1a1a1a', padding: '20px', borderRadius: '10px', border: '1px solid #333' }}>
-                  <h2 style={{ margin: '0 0 15px 0', color: '#e50914', fontSize: '1.5em' }}>🎬 {peliTitulo}</h2>
-                  
-                  {Object.keys(cronogramaAdminAgrupado[peliTitulo]).sort().map(fechaCruda => {
-                    const funcionesDelDia = cronogramaAdminAgrupado[peliTitulo][fechaCruda];
-                    
-                    let fechaFormat = "⚠️ Fecha Inválida / A Confirmar";
-                    if (fechaCruda !== 'Fecha_Invalida') {
-                      const [y, m, d] = fechaCruda.split('-');
-                      fechaFormat = new Date(y, m-1, d).toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
-                    }
-                    
-                    return (
-                      <div key={fechaCruda} style={{ marginLeft: '15px', marginBottom: '20px', borderLeft: '3px solid #444', paddingLeft: '15px' }}>
-                        <h4 style={{ margin: '0 0 10px 0', color: fechaCruda === 'Fecha_Invalida' ? '#ff4d4d' : '#ffc107', textTransform: 'capitalize', fontSize: '1.1em' }}>📅 {fechaFormat}</h4>
-                        
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
-                          {funcionesDelDia.sort((a,b) => (a.fechaObj?.getTime() || 0) - (b.fechaObj?.getTime() || 0)).map(f => {
-                            const hora = f.fechaObj ? f.fechaObj.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : (f.horario || 'Sin Hora');
-                            return (
-                              <div key={getIdFuncion(f)} style={{ background: '#222', padding: '12px', borderRadius: '8px', border: '1px solid #555', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div>
-                                  <strong style={{ color: '#fff', fontSize: '1.2em' }}>🕒 {hora} hs</strong>
-                                  <div style={{ fontSize: '0.8em', color: '#aaa', marginTop: '4px' }}>{f.cineAsociado?.nombre} — Sala {f.sala?.numero}</div>
-                                </div>
-                                <button onClick={() => eliminarFuncion(getIdFuncion(f))} style={{ background: 'none', color: '#ff4d4d', border: 'none', cursor: 'pointer', fontSize: '1.2em' }}>✕</button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })}
+              {/* ENCABEZADO + FILTROS */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid #333', paddingBottom: '15px', marginBottom: '20px' }}>
+                <h3 style={{ margin: 0, color: '#fff' }}>
+                  Cartelera <small style={{ color: '#888', fontWeight: 'normal' }}>— {funcionesAdminFiltradas.length} función(es) en {peliculasCronograma.length} película(s)</small>
+                </h3>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <select value={filtroAdminPeli} onChange={e => setFiltroAdminPeli(e.target.value)} style={estiloSelectAdmin}>
+                    <option value="">Todas las películas</option>
+                    {peliculas.map(p => <option key={getIdPeli(p)} value={String(getIdPeli(p))}>{p.titulo}</option>)}
+                  </select>
+                  <select value={filtroAdminCine} onChange={e => setFiltroAdminCine(e.target.value)} style={estiloSelectAdmin}>
+                    <option value="">Todos los cines</option>
+                    {cines.map(c => <option key={getIdCine(c)} value={String(getIdCine(c))}>{c.nombre}</option>)}
+                  </select>
+                  <button onClick={() => colapsarTodas(false)} style={estiloBotonChico}>Expandir todo</button>
+                  <button onClick={() => colapsarTodas(true)} style={estiloBotonChico}>Colapsar todo</button>
                 </div>
-              ))}
-              {Object.keys(cronogramaAdminAgrupado).length === 0 && <p style={{ color: '#666' }}>No hay funciones en sistema.</p>}
+              </div>
+
+              {/* PELÍCULA > DÍA > CINE > HORAS */}
+              {peliculasCronograma.map(peli => {
+                const colapsada = !!peliculasColapsadas[peli.key];
+                const diasOrdenados = ordenarDias(peli.dias);
+
+                return (
+                  <div key={peli.key} style={{ marginBottom: '20px', background: '#1a1a1a', borderRadius: '12px', border: '1px solid #333', overflow: 'hidden' }}>
+                    {/* Cabecera de película */}
+                    <div onClick={() => toggleColapsada(peli.key)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', cursor: 'pointer', background: '#202020', borderBottom: colapsada ? 'none' : '1px solid #333' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        <span style={{ color: '#888', fontSize: '0.9em' }}>{colapsada ? '▶' : '▼'}</span>
+                        <h2 style={{ margin: 0, color: '#e50914', fontSize: '1.4em' }}>🎬 {peli.titulo}</h2>
+                        {peli.idioma && <span style={{ fontSize: '0.75em', color: '#aaa', background: '#111', padding: '3px 8px', borderRadius: '4px' }}>{peli.idioma}</span>}
+                      </div>
+                      <span style={{ fontSize: '0.85em', color: '#ccc', background: '#111', padding: '5px 12px', borderRadius: '20px', border: '1px solid #333', whiteSpace: 'nowrap' }}>
+                        {peli.total} función(es) · {diasOrdenados.length} día(s)
+                      </span>
+                    </div>
+
+                    {/* Días */}
+                    {!colapsada && (
+                      <div style={{ padding: '10px 20px 20px' }}>
+                        {diasOrdenados.map(dia => {
+                          const invalido = dia === 'Fecha_Invalida';
+                          let fechaBloque = { semana: '⚠️', numero: '?', mes: '' };
+                          if (!invalido) {
+                            const [y, m, d] = dia.split('-').map(Number);
+                            const dt = new Date(y, m - 1, d);
+                            fechaBloque = {
+                              semana: dt.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', ''),
+                              numero: d,
+                              mes: dt.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')
+                            };
+                          }
+                          const esHoy = dia === hoyStr;
+                          const gruposCine = agruparPorCine(peli.dias[dia]);
+
+                          return (
+                            <div key={dia} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '18px', padding: '16px 0', borderBottom: '1px dashed #2f2f2f' }}>
+                              {/* Bloque de fecha tipo calendario */}
+                              <div style={{ textAlign: 'center', background: invalido ? '#3a0000' : esHoy ? '#e50914' : '#111', border: `1px solid ${invalido ? '#ff4d4d' : esHoy ? '#e50914' : '#333'}`, borderRadius: '10px', padding: '10px 6px', alignSelf: 'start' }}>
+                                <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: invalido ? '#ff8080' : esHoy ? '#fff' : '#ffc107', letterSpacing: '1px' }}>{fechaBloque.semana}</div>
+                                <div style={{ fontSize: '1.9em', fontWeight: '800', lineHeight: 1.1, color: '#fff' }}>{fechaBloque.numero}</div>
+                                <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: '#aaa' }}>{fechaBloque.mes}</div>
+                                {esHoy && <div style={{ fontSize: '0.65em', marginTop: '4px', fontWeight: 'bold', color: '#fff' }}>HOY</div>}
+                                {invalido && <div style={{ fontSize: '0.65em', marginTop: '4px', color: '#ff8080' }}>Sin fecha</div>}
+                              </div>
+
+                              {/* Cines y horarios del día */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                {gruposCine.map(gc => (
+                                  <div key={gc.nombre} style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                                    <div style={{ minWidth: '160px', color: '#bbb', fontSize: '0.9em', fontWeight: '600' }}>📍 {gc.nombre}</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                      {gc.funciones.map(f => {
+                                        const hora = formatHora(f.fechaObj);
+                                        return (
+                                          <div key={getIdFuncion(f)} title={invalido ? `Valor recibido del backend: ${JSON.stringify(f.horarioRaw)}` : ''} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#222', border: `1px solid ${invalido ? '#ff4d4d' : '#555'}`, borderRadius: '8px', padding: '8px 12px' }}>
+                                            <div>
+                                              <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '1.1em' }}>
+                                                {hora ? `${hora} hs` : <span style={{ color: '#ff8080', fontSize: '0.8em' }}>{f.horarioRaw !== null ? `Raw: ${JSON.stringify(f.horarioRaw)}` : 'Sin horario'}</span>}
+                                              </div>
+                                              <div style={{ fontSize: '0.75em', color: '#999' }}>Sala {f.sala?.numero ?? '?'}</div>
+                                            </div>
+                                            <button onClick={() => eliminarFuncion(getIdFuncion(f))} title="Eliminar función" style={{ background: 'none', color: '#ff4d4d', border: 'none', cursor: 'pointer', fontSize: '1.1em' }}>✕</button>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {peliculasCronograma.length === 0 && <p style={{ color: '#666' }}>No hay funciones que coincidan con los filtros.</p>}
             </div>
           )}
         </div>
@@ -553,7 +729,7 @@ function App() {
     const funcionesValidas = obtenerFuncionesParaCliente();
     const agrupado = {};
     funcionesValidas.forEach(f => {
-      const clave = f.diaString; 
+      const clave = f.diaString;
       if(!agrupado[clave]) agrupado[clave] = [];
       agrupado[clave].push(f);
     });
@@ -565,7 +741,7 @@ function App() {
   return (
     <div style={{ minHeight: '100vh', background: '#080808', color: '#f1f1f1', padding: '20px', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-        
+
         {/* ENCABEZADO */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222', paddingBottom: '15px', marginBottom: '25px' }}>
           <div>
@@ -615,7 +791,7 @@ function App() {
         {pasoCliente === 2 && (
           <div style={{ animation: 'fadeIn 0.3s' }}>
             <button onClick={() => setPasoCliente(1)} style={{ background: 'transparent', border: '1px solid #444', color: '#aaa', cursor: 'pointer', marginBottom: '20px', padding: '6px 12px', borderRadius:'6px' }}>← Atrás</button>
-            
+
             {modoBusqueda === 'pelicula' ? (
               <>
                 <h2 style={{ color: '#fff', marginBottom: '20px' }}>📍 ¿En qué cine querés ver <span style={{color:'#ffc107'}}>{peliculaSeleccionada?.titulo}</span>?</h2>
@@ -656,29 +832,18 @@ function App() {
                 <p style={{ color: '#ff4d4d' }}>No hay horarios disponibles.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                  {Object.keys(funcionesAgrupadasCliente).sort().map(fechaCruda => {
-                    let fechaFormat = "⚠️ Fecha a Confirmar";
-                    if (fechaCruda !== 'Fecha_Invalida') {
-                      const [y, m, d] = fechaCruda.split('-');
-                      fechaFormat = new Date(y, m-1, d).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-                    }
-                    
-                    return (
-                      <div key={fechaCruda} style={{ borderLeft: '3px solid #444', paddingLeft: '15px' }}>
-                        <h4 style={{ margin: '0 0 15px 0', color: '#ffc107', textTransform: 'capitalize', fontSize: '1.2em' }}>📅 {fechaFormat}</h4>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
-                          {funcionesAgrupadasCliente[fechaCruda].sort((a,b)=> (a.fechaObj?.getTime() || 0)-(b.fechaObj?.getTime() || 0)).map(f => {
-                            const hora = f.fechaObj ? f.fechaObj.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : (f.horario || '?');
-                            return (
-                              <button key={getIdFuncion(f)} onClick={() => handleSeleccionarFuncion(f)} style={{ padding: '12px 25px', background: '#1a1a1a', color: '#fff', border: '1px solid #555', borderRadius: '8px', cursor: 'pointer', fontSize: '1.2em', fontWeight: 'bold' }}>
-                                {hora}
-                              </button>
-                            )
-                          })}
-                        </div>
+                  {Object.keys(funcionesAgrupadasCliente).sort((a, b) => a === 'Fecha_Invalida' ? 1 : b === 'Fecha_Invalida' ? -1 : a.localeCompare(b)).map(fechaCruda => (
+                    <div key={fechaCruda} style={{ borderLeft: '3px solid #444', paddingLeft: '15px' }}>
+                      <h4 style={{ margin: '0 0 15px 0', color: '#ffc107', textTransform: 'capitalize', fontSize: '1.2em' }}>📅 {formatDiaLargo(fechaCruda)}</h4>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+                        {funcionesAgrupadasCliente[fechaCruda].sort((a,b)=> (a.fechaObj?.getTime() || 0)-(b.fechaObj?.getTime() || 0)).map(f => (
+                          <button key={getIdFuncion(f)} onClick={() => handleSeleccionarFuncion(f)} style={{ padding: '12px 25px', background: '#1a1a1a', color: '#fff', border: '1px solid #555', borderRadius: '8px', cursor: 'pointer', fontSize: '1.2em', fontWeight: 'bold' }}>
+                            {formatHora(f.fechaObj) || '?'}
+                          </button>
+                        ))}
                       </div>
-                    )
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -695,7 +860,7 @@ function App() {
                 <h1 style={{ color: '#28a745', margin: '0 0 10px 0' }}>¡Entradas Confirmadas! 🎉</h1>
                 <h2 style={{ color: '#fff' }}>{peliculaSeleccionada?.titulo}</h2>
                 <p style={{ color: '#aaa', fontSize: '1.1em' }}>📍 {cineSeleccionado?.nombre} | Sala {funcionSeleccionada.sala?.numero}</p>
-                <p style={{ color: '#aaa', fontSize: '1.1em' }}>🕒 {funcionSeleccionada.fechaObj ? funcionSeleccionada.fechaObj.toLocaleString('es-AR') : 'Horario a confirmar'}</p>
+                <p style={{ color: '#aaa', fontSize: '1.1em' }}>🕒 {formatFechaHora(funcionSeleccionada.fechaObj) || 'Horario a confirmar'}</p>
                 <div style={{ margin: '20px 0', padding: '15px', background: '#1a1a1a', borderRadius: '8px', display: 'inline-block' }}>
                   <span style={{ color: '#888', display: 'block', fontSize: '0.8em', textTransform: 'uppercase' }}>Butacas</span>
                   <span style={{ color: '#ffc107', fontSize: '1.5em', fontWeight: 'bold' }}>{butacasSeleccionadas.map(b => b.etiqueta).join(', ')}</span>
@@ -706,7 +871,7 @@ function App() {
             ) : (
               <div style={{ background: '#121212', borderRadius: '12px', padding: '30px 20px', border: '1px solid #222', textAlign: 'center' }}>
                 <h2 style={{ margin: '0 0 5px 0', color: '#fff' }}>{peliculaSeleccionada?.titulo}</h2>
-                <p style={{ margin: '0 0 30px 0', color: '#888' }}>{funcionSeleccionada.fechaObj ? funcionSeleccionada.fechaObj.toLocaleString('es-AR') : 'Horario a Confirmar'} — Sala {funcionSeleccionada.sala?.numero}</p>
+                <p style={{ margin: '0 0 30px 0', color: '#888' }}>{formatFechaHora(funcionSeleccionada.fechaObj) || 'Horario a Confirmar'} — Sala {funcionSeleccionada.sala?.numero}</p>
 
                 <div style={{ background: '#333', color: '#fff', width: '80%', maxWidth: '400px', height: '8px', margin: '0 auto 40px auto', borderRadius: '4px' }} />
 
@@ -720,9 +885,9 @@ function App() {
                             return <div key={asiento.id} style={{ width: '30px', height: '30px' }} />
                           }
                           // Ocupada check robusto
-                          const ocupada = butacasOcupadas.some(b => b === asiento.id || b === asiento.etiqueta || b.id === asiento.id || b.etiqueta === asiento.etiqueta);
+                          const ocupada = butacasOcupadas.some(b => b === asiento.id || b === asiento.etiqueta || b?.id === asiento.id || b?.etiqueta === asiento.etiqueta);
                           const seleccionada = butacasSeleccionadas.some(b => b.id === asiento.id);
-                          
+
                           return (
                             <div key={asiento.id} onClick={() => {
                               if (!ocupada) {
