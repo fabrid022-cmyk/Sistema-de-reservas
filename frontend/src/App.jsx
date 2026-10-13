@@ -34,10 +34,8 @@ function App() {
   const [nuevoHorarioEdit, setNuevoHorarioEdit] = useState('')
   const [nuevaSalaNumero, setNuevaSalaNumero] = useState('')
   const [nuevaSalaCapacidad, setNuevaSalaCapacidad] = useState(50)
-  const [editandoSalaId, setEditandoSalaId] = useState(null)
-  const [editCapacidad, setEditCapacidad] = useState(50)
 
-  // Cliente (Flujo Progresivo Paso a Paso)
+  // Cliente (Flujo Progresivo Jerárquico)
   const [pasoCliente, setPasoCliente] = useState(1); // 1: Cines, 2: Películas, 3: Horarios, 4: Butacas
   const [cineSeleccionado, setCineSeleccionado] = useState(null)
   const [peliculaSeleccionada, setPeliculaSeleccionada] = useState(null)
@@ -47,7 +45,6 @@ function App() {
   const [reservaExitosa, setReservaExitosa] = useState(false)
   const [activeTabAdmin, setActiveTabAdmin] = useState('cines')
 
-  // Carga robusta de datos (recolecta funciones por cine para asegurar visibilidad en admin)
   const cargarDatos = async () => {
     try {
       const resCines = await fetch(`${API_URL}/api/cines`);
@@ -57,17 +54,18 @@ function App() {
 
         let todasLasFunciones = [];
         for (const cine of cinesData) {
+          const cid = cine.idCine || cine.id;
           try {
-            const resFuncCine = await fetch(`${API_URL}/api/funciones/cine/${cine.idCine || cine.id}`);
+            const resFuncCine = await fetch(`${API_URL}/api/funciones/cine/${cid}`);
             if (resFuncCine.ok) {
               const funcData = await resFuncCine.json();
               if (Array.isArray(funcData)) {
-                todasLasFunciones = [...todasLasFunciones, ...funcData];
+                // Adjuntamos el cine a la función para facilitar el renderizado jerárquico
+                const funcMapeadas = funcData.map(f => ({ ...f, cineAsociado: cine }));
+                todasLasFunciones = [...todasLasFunciones, ...funcMapeadas];
               }
             }
-          } catch (err) {
-            // Ignora si un cine no tiene funciones o da error específico
-          }
+          } catch (err) {}
         }
         setFuncionesAdmin(todasLasFunciones);
       }
@@ -153,15 +151,6 @@ function App() {
     else alert("Error al agregar sala.");
   }
 
-  const guardarCapacidadSala = async (idSala) => {
-    const res = await fetch(`${API_URL}/api/salas/${idSala}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ capacidad: parseInt(editCapacidad) })
-    })
-    if (res.ok) { setEditandoSalaId(null); cargarDatos(); }
-    else alert("Error al actualizar capacidad.");
-  }
-
   const eliminarSala = async (idSala) => {
     if (window.confirm("¿Eliminar sala?")) {
       const res = await fetch(`${API_URL}/api/salas/${idSala}`, { method: 'DELETE' });
@@ -228,7 +217,7 @@ function App() {
     }
   }
 
-  // --- CLIENTE (FLUJO PROGRESIVO) ---
+  // --- CLIENTE (FLUJO PROGRESIVO JERÁRQUICO) ---
   const seleccionarCineCliente = async (cine) => {
     setCineSeleccionado(cine); setPeliculaSeleccionada(null); setFuncionSeleccionada(null); setButacasSeleccionadas([]);
     const cid = cine.idCine || cine.id;
@@ -270,9 +259,12 @@ function App() {
 
   const confirmarReserva = async () => {
     const idF = funcionSeleccionada.idFuncion || funcionSeleccionada.id;
+    
+    // Payload estructurado para que Spring Boot mapee correctamente las entidades relacionales (Evita el Error 400)
     const payload = {
-      idUsuario: Number(usuario.idUsuario || usuario.id || 1),
-      idSala: Number(funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id || idF),
+      usuario: { idUsuario: Number(usuario.idUsuario || usuario.id || 1) },
+      funcion: { idFuncion: Number(idF) },
+      sala: { idSala: Number(funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id || 1) },
       butacasSeleccionadas: butacasSeleccionadas
     }
 
@@ -313,6 +305,7 @@ function App() {
     return asientos;
   };
 
+  // Filtrado limpio y estructurado sin duplicados (Mamushka resuelta)
   const peliculasDisponiblesEnCine = Array.from(
     new Map(
       funcionesCliente
@@ -492,7 +485,7 @@ function App() {
                     <div key={idF} style={{ background: '#181818', border: '1px solid #2c2c2c', borderRadius: '8px', padding: '15px', position: 'relative' }}>
                       <button onClick={() => eliminarFuncion(idF)} style={{ position: 'absolute', top: '12px', right: '12px', background: 'none', border: 'none', color: '#ff4d4d', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
                       <h5 style={{ margin: '0 0 5px 0', fontSize: '1.05em', color: '#fff' }}>🎬 {f.pelicula?.titulo || 'Película'}</h5>
-                      <p style={{ margin: '3px 0', fontSize: '0.85em', color: '#bbb' }}>📍 {f.sala?.cine?.nombre || 'Complejo'} — Sala {f.sala?.numero}</p>
+                      <p style={{ margin: '3px 0', fontSize: '0.85em', color: '#bbb' }}>📍 {f.sala?.cine?.nombre || f.cineAsociado?.nombre || 'Complejo'} — Sala {f.sala?.numero}</p>
                       <p style={{ margin: '3px 0 12px 0', fontSize: '0.9em', color: '#ffc107', fontWeight: 'bold' }}>🕒 {fechaStr}</p>
                       
                       {editandoFuncionId === idF ? (
