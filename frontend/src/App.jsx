@@ -47,26 +47,39 @@ function App() {
   const [reservaExitosa, setReservaExitosa] = useState(false)
   const [activeTabAdmin, setActiveTabAdmin] = useState('cines')
 
+  // Carga robusta de datos (recolecta funciones por cine para asegurar visibilidad en admin)
   const cargarDatos = async () => {
     try {
       const resCines = await fetch(`${API_URL}/api/cines`);
-      if (resCines.ok) setCines(await resCines.json());
-    } catch (e) { console.error("Error cines:", e); }
+      if (resCines.ok) {
+        const cinesData = await resCines.json();
+        setCines(Array.isArray(cinesData) ? cinesData : []);
+
+        let todasLasFunciones = [];
+        for (const cine of cinesData) {
+          try {
+            const resFuncCine = await fetch(`${API_URL}/api/funciones/cine/${cine.idCine || cine.id}`);
+            if (resFuncCine.ok) {
+              const funcData = await resFuncCine.json();
+              if (Array.isArray(funcData)) {
+                todasLasFunciones = [...todasLasFunciones, ...funcData];
+              }
+            }
+          } catch (err) {
+            // Ignora si un cine no tiene funciones o da error específico
+          }
+        }
+        setFuncionesAdmin(todasLasFunciones);
+      }
+    } catch (e) { console.error("Error cargando cines:", e); }
 
     try {
       const resPelis = await fetch(`${API_URL}/api/peliculas`);
-      if (resPelis.ok) setPeliculas(await resPelis.json());
-    } catch (e) { console.error("Error pelis:", e); }
-
-    try {
-      const resFunc = await fetch(`${API_URL}/api/funciones`);
-      if (resFunc.ok) {
-        const data = await resFunc.json();
-        setFuncionesAdmin(Array.isArray(data) ? data : []);
-      } else {
-        setFuncionesAdmin([]);
+      if (resPelis.ok) {
+        const pelisData = await resPelis.json();
+        setPeliculas(Array.isArray(pelisData) ? pelisData : []);
       }
-    } catch (e) { setFuncionesAdmin([]); }
+    } catch (e) { console.error("Error pelis:", e); }
   }
 
   useEffect(() => { if (usuario) cargarDatos(); }, [usuario])
@@ -258,8 +271,8 @@ function App() {
   const confirmarReserva = async () => {
     const idF = funcionSeleccionada.idFuncion || funcionSeleccionada.id;
     const payload = {
-      idUsuario: usuario.idUsuario || usuario.id || 1,
-      idSala: funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id || idF,
+      idUsuario: Number(usuario.idUsuario || usuario.id || 1),
+      idSala: Number(funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id || idF),
       butacasSeleccionadas: butacasSeleccionadas
     }
 
@@ -271,14 +284,14 @@ function App() {
         setButacasOcupadas(prev => [...prev, ...butacasSeleccionadas])
         setReservaExitosa(true)
       } else {
-        alert("Error al procesar la reserva.")
+        const errorText = await res.text();
+        alert(`El servidor rechazó la reserva (Error 400). Detalle: ${errorText || 'Estructura inválida'}`);
       }
     } catch (error) {
-      alert("Error de red.")
+      alert("Error de red al procesar la reserva.")
     }
   }
 
-  // Generador de Matriz con distribución variable (Atrás más amplia / Adelante más corta si se desea)
   const capacidadTotal = funcionSeleccionada?.sala?.capacidad || 50;
   const columnasPorFila = 10;
   const letrasFilas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -503,12 +516,11 @@ function App() {
     )
   }
 
-  // --- VISTA CLIENTE (FLUJO PROGRESIVO Y RESPONSIVE) ---
+  // --- VISTA CLIENTE ---
   return (
     <div style={{ minHeight: '100vh', background: '#080808', color: '#f1f1f1', padding: '20px', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: '1050px', margin: '0 auto' }}>
         
-        {/* Header con Stepper de Pasos */}
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '15px', borderBottom: '1px solid #222', paddingBottom: '18px', marginBottom: '25px' }}>
           <div>
             <h1 style={{ margin: 0, color: '#e50914', fontSize: '2.1em', fontWeight: '900', letterSpacing: '1px' }}>CINEMAX 🍿</h1>
