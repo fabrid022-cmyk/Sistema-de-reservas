@@ -51,16 +51,21 @@ function App() {
     try {
       const resCines = await fetch(`${API_URL}/api/cines`);
       if (resCines.ok) setCines(await resCines.json());
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Error cines:", e); }
 
     try {
       const resPelis = await fetch(`${API_URL}/api/peliculas`);
       if (resPelis.ok) setPeliculas(await resPelis.json());
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Error pelis:", e); }
 
     try {
       const resFunc = await fetch(`${API_URL}/api/funciones`);
-      if (resFunc.ok) setFuncionesAdmin(await resFunc.json());
+      if (resFunc.ok) {
+        const data = await resFunc.json();
+        setFuncionesAdmin(Array.isArray(data) ? data : []);
+      } else {
+        setFuncionesAdmin([]);
+      }
     } catch (e) { setFuncionesAdmin([]); }
   }
 
@@ -105,6 +110,7 @@ function App() {
       body: JSON.stringify({ nombre: nuevoCineNombre, ubicacion: { pais: "Argentina", direccion: nuevoCineDireccion }})
     })
     if (res.ok) { setNuevoCineNombre(''); setNuevoCineDireccion(''); cargarDatos(); }
+    else alert("No se pudo crear el cine.");
   }
 
   const guardarEdicionCine = async (id) => {
@@ -113,12 +119,14 @@ function App() {
       body: JSON.stringify({ nombre: editCineNombre, ubicacion: { pais: "Argentina", direccion: editCineDireccion }})
     })
     if (res.ok) { setEditandoCineId(null); cargarDatos(); }
+    else alert("Error al actualizar el cine.");
   }
 
   const eliminarCine = async (id) => {
     if (window.confirm("¿Estás seguro de eliminar este cine?")) {
-      await fetch(`${API_URL}/api/cines/${id}`, { method: 'DELETE' })
-      cargarDatos()
+      const res = await fetch(`${API_URL}/api/cines/${id}`, { method: 'DELETE' });
+      if (res.ok) cargarDatos();
+      else alert("No se pudo eliminar el complejo.");
     }
   }
 
@@ -129,6 +137,7 @@ function App() {
       body: JSON.stringify({ numero: parseInt(nuevaSalaNumero), capacidad: parseInt(nuevaSalaCapacidad) || 50 })
     })
     if (res.ok) { setNuevaSalaNumero(''); setNuevaSalaCapacidad(50); cargarDatos(); }
+    else alert("Error al agregar sala.");
   }
 
   const guardarCapacidadSala = async (idSala) => {
@@ -137,12 +146,14 @@ function App() {
       body: JSON.stringify({ capacidad: parseInt(editCapacidad) })
     })
     if (res.ok) { setEditandoSalaId(null); cargarDatos(); }
+    else alert("Error al actualizar capacidad.");
   }
 
   const eliminarSala = async (idSala) => {
     if (window.confirm("¿Eliminar sala?")) {
-      await fetch(`${API_URL}/api/salas/${idSala}`, { method: 'DELETE' })
-      cargarDatos()
+      const res = await fetch(`${API_URL}/api/salas/${idSala}`, { method: 'DELETE' });
+      if (res.ok) cargarDatos();
+      else alert("No se pudo eliminar la sala.");
     }
   }
 
@@ -153,12 +164,14 @@ function App() {
       body: JSON.stringify({ titulo: nuevaPeliTitulo, idioma: nuevaPeliIdioma, formato: "2D", duracionMinutos: 120 })
     })
     if (res.ok) { setNuevaPeliTitulo(''); setNuevaPeliIdioma(''); cargarDatos(); }
+    else alert("Error al crear la película.");
   }
 
   const eliminarPelicula = async (id) => {
     if (window.confirm("¿Eliminar película?")) {
-      await fetch(`${API_URL}/api/peliculas/${id}`, { method: 'DELETE' }); 
-      cargarDatos();
+      const res = await fetch(`${API_URL}/api/peliculas/${id}`, { method: 'DELETE' });
+      if (res.ok) cargarDatos();
+      else alert("No se pudo eliminar la película.");
     }
   }
 
@@ -196,20 +209,26 @@ function App() {
 
   const eliminarFuncion = async (idFuncion) => {
     if (window.confirm("¿Eliminar esta función?")) {
-      await fetch(`${API_URL}/api/funciones/${idFuncion}`, { method: 'DELETE' });
-      cargarDatos();
+      const res = await fetch(`${API_URL}/api/funciones/${idFuncion}`, { method: 'DELETE' });
+      if (res.ok) cargarDatos();
+      else alert("No se pudo eliminar la función.");
     }
   }
 
   // --- CLIENTE (FLUJO PROGRESIVO) ---
   const seleccionarCineCliente = async (cine) => {
     setCineSeleccionado(cine); setPeliculaSeleccionada(null); setFuncionSeleccionada(null); setButacasSeleccionadas([]);
+    const cid = cine.idCine || cine.id;
     try {
-      const res = await fetch(`${API_URL}/api/funciones/cine/${cine.idCine || cine.id}`)
-      const data = await res.json()
-      setFuncionesCliente(Array.isArray(data) ? data : [])
+      const res = await fetch(`${API_URL}/api/funciones/cine/${cid}`)
+      if (res.ok) {
+        const data = await res.json();
+        setFuncionesCliente(Array.isArray(data) ? data : []);
+      } else {
+        setFuncionesCliente([]);
+      }
     } catch {
-      setFuncionesCliente([])
+      setFuncionesCliente([]);
     }
     setPasoCliente(2);
   }
@@ -240,7 +259,7 @@ function App() {
     const idF = funcionSeleccionada.idFuncion || funcionSeleccionada.id;
     const payload = {
       idUsuario: usuario.idUsuario || usuario.id || 1,
-      idSala: funcionSeleccionada.sala?.idSala || idF,
+      idSala: funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id || idF,
       butacasSeleccionadas: butacasSeleccionadas
     }
 
@@ -259,7 +278,7 @@ function App() {
     }
   }
 
-  // Matriz de Asientos por Filas (A1, A2... B1...)
+  // Generador de Matriz con distribución variable (Atrás más amplia / Adelante más corta si se desea)
   const capacidadTotal = funcionSeleccionada?.sala?.capacidad || 50;
   const columnasPorFila = 10;
   const letrasFilas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -336,7 +355,7 @@ function App() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <button onClick={() => setActiveTabAdmin('cines')} style={{ padding: '8px 16px', background: activeTabAdmin === 'cines' ? '#e50914' : '#181818', color: '#fff', border: '1px solid #333', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>📍 Cines y Salas</button>
             <button onClick={() => setActiveTabAdmin('peliculas')} style={{ padding: '8px 16px', background: activeTabAdmin === 'peliculas' ? '#e50914' : '#181818', color: '#fff', border: '1px solid #333', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>🎬 Películas</button>
             <button onClick={() => setActiveTabAdmin('funciones')} style={{ padding: '8px 16px', background: activeTabAdmin === 'funciones' ? '#e50914' : '#181818', color: '#fff', border: '1px solid #333', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>🕒 Funciones</button>
