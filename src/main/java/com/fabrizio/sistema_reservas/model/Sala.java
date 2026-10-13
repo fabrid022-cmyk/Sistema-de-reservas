@@ -3,18 +3,21 @@ package com.fabrizio.sistema_reservas.model;
 import jakarta.persistence.*;
 import java.util.ArrayList;
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
+@Table(name = "demo_sala")
 public class Sala {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private int idSala;
+    private Integer idSala;
     
-    private int numero;
-    private int capacidad;
+    private Integer numero;
+    private Integer capacidad;
     
     @ManyToOne
     @JoinColumn(name = "cine_id")
+    @JsonIgnore
     private Cine cine;
 
     @OneToMany(mappedBy = "sala", cascade = CascadeType.ALL)
@@ -22,32 +25,32 @@ public class Sala {
 
     public Sala() {}
 
-    public Sala(int numero, int capacidad) {
+    public Sala(Integer numero, Integer capacidad) {
         this.numero = numero;
         this.capacidad = capacidad;
     }
 
-    public int getIdSala() {
+    public Integer getIdSala() {
         return idSala;
     }
 
-    public void setIdSala(int idSala) {
+    public void setIdSala(Integer idSala) {
         this.idSala = idSala;
     }
 
-    public int getNumero() {
+    public Integer getNumero() {
         return numero;
     }
 
-    public void setNumero(int numero) {
+    public void setNumero(Integer numero) {
         this.numero = numero;
     }
 
-    public int getCapacidad() {
+    public Integer getCapacidad() {
         return capacidad;
     }
 
-    public void setCapacidad(int capacidad) {
+    public void setCapacidad(Integer capacidad) {
         this.capacidad = capacidad;
     }
 

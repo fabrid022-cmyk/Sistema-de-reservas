@@ -1,6 +1,7 @@
 package com.fabrizio.sistema_reservas.model;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
 public class Butaca {
@@ -13,6 +14,7 @@ public class Butaca {
 
     @ManyToOne
     @JoinColumn(name = "sala_id")
+    @JsonIgnore
     private Sala sala;
 
     public Butaca() {}

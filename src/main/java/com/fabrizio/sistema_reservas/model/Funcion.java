@@ -4,10 +4,13 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
+@Table(name = "demo_funcion")
 public class Funcion {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private int idFuncion;
+    private Integer idFuncion;
+
+    private LocalDateTime horario;
     
     @ManyToOne
     @JoinColumn(name = "sala_id")
@@ -35,11 +38,11 @@ public class Funcion {
         this.formato = formato;
     }
 
-    public int getIdFuncion() {
+    public Integer getIdFuncion() {
         return idFuncion;
     }
 
-    public void setIdFuncion(int idFuncion) {
+    public void setIdFuncion(Integer idFuncion) {
         this.idFuncion = idFuncion;
     }
 

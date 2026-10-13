@@ -15,15 +15,10 @@ public class ReservaService {
     @Autowired
     private ReservaRepository reservaRepository;
 
-    // @Transactional asegura que si algo falla acá adentro, no se guarde nada a medias
     @Transactional
     public Reserva crearReserva(Reserva reserva) {
-        // Regla de negocio: Toda reserva nueva arranca como PENDIENTE y con la fecha actual
         reserva.setEstado(Estado.PENDIENTE);
         reserva.setFechaHoraCreacion(LocalDateTime.now());
-        
-        // Acá a futuro podemos sumar validaciones (ej. verificar que las butacas elegidas estén libres)
-        
         return reservaRepository.save(reserva);
     }
 
