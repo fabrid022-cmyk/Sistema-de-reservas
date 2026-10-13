@@ -13,7 +13,7 @@ function App() {
   const [cines, setCines] = useState([])
   const [peliculas, setPeliculas] = useState([])
   const [funcionesGlobales, setFuncionesGlobales] = useState([])
-  const [butacasOcupadas, setButacasOcupadas] = useState([])
+  const [butacasOcupadas, setButacasOcupadas] = useState([]) // El backend manda números (ID de butaca)
 
   // --- ADMIN: FORMULARIOS ---
   const [activeTabAdmin, setActiveTabAdmin] = useState('cines')
@@ -39,7 +39,7 @@ function App() {
   const [cineSeleccionado, setCineSeleccionado] = useState(null)
   const [peliculaSeleccionada, setPeliculaSeleccionada] = useState(null)
   const [funcionSeleccionada, setFuncionSeleccionada] = useState(null)
-  const [butacasSeleccionadas, setButacasSeleccionadas] = useState([])
+  const [butacasSeleccionadas, setButacasSeleccionadas] = useState([]) // Acá guardamos objetos { id: 1, etiqueta: 'A1' }
   
   const [tiempoRestante, setTiempoRestante] = useState(300)
   const [reservaExitosa, setReservaExitosa] = useState(false)
@@ -51,31 +51,18 @@ function App() {
   const getIdCine = (c) => c ? (c.idCine || c.id) : null;
   const getIdFuncion = (f) => f ? (f.idFuncion || f.id) : null;
 
-  // PARSEADOR INFALIBLE DE FECHAS DE SPRING BOOT
+  // PARSEADOR INFALIBLE DE FECHAS (SOLUCIÓN AL INVALID DATE)
   const parsearFecha = (fechaCruda) => {
     if (!fechaCruda) return null;
     try {
-      if (typeof fechaCruda === 'string' && fechaCruda.startsWith('[')) {
-        fechaCruda = JSON.parse(fechaCruda);
-      }
+      // Solución principal: Spring Boot manda un array [año, mes, dia, hora, minuto]
       if (Array.isArray(fechaCruda)) {
         const [y, m, d, h = 0, min = 0, s = 0] = fechaCruda;
+        // En JavaScript los meses son 0-11, por eso m - 1
         return new Date(y, m - 1, d, h, min, s);
       }
       
       let str = String(fechaCruda).trim();
-      
-      // Capturar formatos DD/MM/YYYY o DD-MM-YYYY
-      if (/^\d{2}[\/\-]\d{2}[\/\-]\d{4}/.test(str)) {
-        const parts = str.split(/[\/\- \T]/);
-        const d = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10) - 1;
-        const y = parseInt(parts[2], 10);
-        const h = parts[3] ? parseInt(parts[3].split(':')[0] || 0, 10) : 0;
-        const min = parts[3] ? parseInt(parts[3].split(':')[1] || 0, 10) : 0;
-        return new Date(y, m, d, h, min);
-      }
-      
       str = str.replace(' ', 'T'); 
       const dObj = new Date(str);
       if (!isNaN(dObj.getTime())) return dObj;
@@ -168,7 +155,7 @@ function App() {
       })
       if (res.ok) setUsuario(await res.json())
       else setErrorLogin('Credenciales incorrectas.')
-    } catch (err) { setErrorLogin('Error de comunicación con el backend.') }
+    } catch (err) { setErrorLogin('Error de conexión con el backend.') }
   }
 
   const cerrarSesion = () => {
@@ -294,6 +281,7 @@ function App() {
   const handleSeleccionarFuncion = async (funcion) => {
     setFuncionSeleccionada(funcion); setButacasSeleccionadas([]); setTiempoRestante(300); setReservaExitosa(false);
     try {
+      // El backend devuelve una lista de números (idSala / butaca ocupada)
       const res = await fetch(`${API_URL}/api/reservas/ocupadas/${getIdFuncion(funcion)}`);
       if (res.ok) setButacasOcupadas(await res.json());
       else setButacasOcupadas([]);
@@ -301,28 +289,33 @@ function App() {
     setPasoCliente(4);
   }
 
+  // ==========================================
+  // CORRECCIÓN DEFINITIVA DE LA RESERVA (ERROR 400)
+  // ==========================================
   const confirmarReserva = async () => {
     const idU = Number(usuario.idUsuario || usuario.id || 1);
-    const idF = Number(getIdFuncion(funcionSeleccionada));
+    const idS = Number(funcionSeleccionada.sala?.idSala || funcionSeleccionada.sala?.id);
 
-    // Formato estándar (ID numéricos puros)
-    const payload = { idUsuario: idU, idFuncion: idF, butacasSeleccionadas: butacasSeleccionadas };
+    // Mapeamos a un array solo de enteros (ej: [1, 5, 8]) para que coincida con el backend List<Integer>
+    const arrayNumerosButacas = butacasSeleccionadas.map(b => b.id);
+
+    // Estructura EXACTA de tu ReservaRequestDTO en Spring Boot
+    const payload = { 
+      idUsuario: idU, 
+      idSala: idS, 
+      butacasSeleccionadas: arrayNumerosButacas 
+    };
 
     try {
       const res = await fetch(`${API_URL}/api/reservas`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setButacasOcupadas(prev => [...prev, ...butacasSeleccionadas]); setReservaExitosa(true);
+        setButacasOcupadas(prev => [...prev, ...arrayNumerosButacas]); 
+        setReservaExitosa(true);
       } else {
-        // Fallback Formato Relacional por si Spring Boot lo pide
-        const payloadAnidado = { usuario: { idUsuario: idU }, funcion: { idFuncion: idF }, butacasSeleccionadas: butacasSeleccionadas };
-        const res2 = await fetch(`${API_URL}/api/reservas`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadAnidado)
-        });
-        
-        if (res2.ok) { setButacasOcupadas(prev => [...prev, ...butacasSeleccionadas]); setReservaExitosa(true); } 
-        else { alert(`El servidor rechazó la compra. Revisá si el método POST en Reservas usa los campos correctos.`); }
+        const errorText = await res.text();
+        alert(`Error al reservar. El servidor dice: ${errorText}`);
       }
     } catch (error) { alert("Error de red."); }
   }
@@ -385,7 +378,7 @@ function App() {
     // Agrupar funciones para Admin sin ocultar las rotas
     const cronogramaAdminAgrupado = funcionesGlobales.reduce((acc, f) => {
       const peliTitulo = f.pelicula?.titulo || 'Desconocida';
-      const fechaClave = f.diaString; // Si falló, será 'Fecha_Invalida'
+      const fechaClave = f.diaString; 
       
       if (!acc[peliTitulo]) acc[peliTitulo] = {};
       if (!acc[peliTitulo][fechaClave]) acc[peliTitulo][fechaClave] = [];
@@ -560,7 +553,6 @@ function App() {
     const funcionesValidas = obtenerFuncionesParaCliente();
     const agrupado = {};
     funcionesValidas.forEach(f => {
-      // Las mostramos aunque sean invalidas para que no desaparezcan misteriosamente
       const clave = f.diaString; 
       if(!agrupado[clave]) agrupado[clave] = [];
       agrupado[clave].push(f);
@@ -706,7 +698,7 @@ function App() {
                 <p style={{ color: '#aaa', fontSize: '1.1em' }}>🕒 {funcionSeleccionada.fechaObj ? funcionSeleccionada.fechaObj.toLocaleString('es-AR') : 'Horario a confirmar'}</p>
                 <div style={{ margin: '20px 0', padding: '15px', background: '#1a1a1a', borderRadius: '8px', display: 'inline-block' }}>
                   <span style={{ color: '#888', display: 'block', fontSize: '0.8em', textTransform: 'uppercase' }}>Butacas</span>
-                  <span style={{ color: '#ffc107', fontSize: '1.5em', fontWeight: 'bold' }}>{butacasSeleccionadas.join(', ')}</span>
+                  <span style={{ color: '#ffc107', fontSize: '1.5em', fontWeight: 'bold' }}>{butacasSeleccionadas.map(b => b.etiqueta).join(', ')}</span>
                 </div>
                 <br/>
                 <button onClick={reiniciarFlujoCliente} style={{ padding: '12px 30px', background: '#e50914', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Comprar Otra</button>
@@ -729,13 +721,13 @@ function App() {
                           }
                           // Ocupada check robusto
                           const ocupada = butacasOcupadas.some(b => b === asiento.id || b === asiento.etiqueta || b.id === asiento.id || b.etiqueta === asiento.etiqueta);
-                          const seleccionada = butacasSeleccionadas.includes(asiento.etiqueta);
+                          const seleccionada = butacasSeleccionadas.some(b => b.id === asiento.id);
                           
                           return (
                             <div key={asiento.id} onClick={() => {
                               if (!ocupada) {
-                                seleccionada ? setButacasSeleccionadas(prev => prev.filter(b => b !== asiento.etiqueta))
-                                             : setButacasSeleccionadas(prev => [...prev, asiento.etiqueta])
+                                seleccionada ? setButacasSeleccionadas(prev => prev.filter(b => b.id !== asiento.id))
+                                             : setButacasSeleccionadas(prev => [...prev, asiento])
                               }
                             }}
                             style={{ width: '30px', height: '30px', background: ocupada ? '#dc3545' : seleccionada ? '#ffc107' : '#222', color: seleccionada ? '#000' : '#888', border: '1px solid #444', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65em', fontWeight: 'bold', cursor: ocupada ? 'not-allowed' : 'pointer' }}>
